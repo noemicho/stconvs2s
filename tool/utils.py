@@ -13,7 +13,7 @@ from matplotlib.ticker import MaxNLocator
 import torch
 
 class Util:
-    def __init__(self, model_descr, dataset_type='notebooks', version=0, prefix=''):
+    def __init__(self, model_descr, dataset_type='notebooks', version=0, prefix='', should_flip=False):
         current_time = datetime.now()
         self.model_descr = model_descr
         self.start_time = current_time.strftime('%d/%m/%Y %H:%M:%S')
@@ -23,6 +23,7 @@ class Util:
         self.base_filename =  prefix + self.version + '_' + current_time.strftime('%Y%m%d-%H%M%S')
         self.project_dir = str(Path(__file__).absolute().parent.parent)
         self.output_dir = os.path.join(self.project_dir, 'output', dataset_type)
+        self.should_flip = should_flip
         
     def plot(self, data, columns_name, x_label, y_label, title, enable=True, inline=False):
         if (enable):
@@ -162,14 +163,16 @@ class Util:
         
     def __create_image_plot(self, tensor, ax, i, j, index, step, ax_input=False):
         cmap = 'YlGnBu' if self.base_filename.startswith('chirps') else 'viridis'
-        # Select first channel (0) for visualization to ensure 2D image
-        tensor_numpy = tensor[0,0,index,:,:].squeeze().cpu().numpy()
+        tensor = np.transpose(tensor, (0, 2, 3, 4, 1))
+        tensor_numpy = tensor[0,index,:,:,:].squeeze().cpu().numpy()
+        origin = 'lower' if self.should_flip else 'upper'
+            
         if step == 5 or ax_input:
-            ax[j].imshow(np.flipud(tensor_numpy), cmap=cmap)
+            ax[j].imshow(tensor_numpy, cmap=cmap, origin=origin)
             ax[j].get_xaxis().set_visible(False)
             ax[j].get_yaxis().set_visible(False)
         else:
-            ax[i][j].imshow(np.flipud(tensor_numpy), cmap=cmap)
+            ax[i][j].imshow(tensor_numpy, cmap=cmap, origin=origin)
             ax[i][j].get_xaxis().set_visible(False)
             ax[i][j].get_yaxis().set_visible(False)        
         return ax

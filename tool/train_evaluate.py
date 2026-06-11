@@ -44,13 +44,19 @@ class Trainer:
         self.model.train()
         epoch_loss = 0.0
         mask_land = self.util.get_mask_land().to(self.device)
-        for batch_idx, (inputs, target) in enumerate(self.train_loader):
-            inputs, target = inputs.to(self.device), target.to(self.device)
+
+        for batch_idx, (inputs, target, mask) in enumerate(self.train_loader):
+            inputs = inputs.to(self.device)
+            target = target.to(self.device)
+            mask = mask.to(self.device)
             # get prediction
             output = self.model(inputs)
+
             if is_chirps:
                 output = mask_land * output
-            loss = self.loss_fn(output, target)
+            # with mask
+            loss = self.loss_fn(output, target, mask)
+
             # clear previous gradients 
             self.optimizer.zero_grad()
             # compute gradients
@@ -111,28 +117,90 @@ class Evaluator:
        
     def eval(self, is_test=True, is_chirps=False):
         self.model.eval()
+
         cumulative_rmse, cumulative_mae = 0.0, 0.0
         observation_rmse, observation_mae = [0]*self.step, [0]*self.step
         loader_size = len(self.data_loader)
+
+        #precip_bins = [
+        #    ("Fraca (<1.25 mm/15min)", 0.0, 1.25),
+        #    ("Moderada (1.25-6.25 mm/15min)", 1.25, 6.25),
+        #    ("Forte (6.25-12.5 mm/15min)", 6.25, 12.5),
+        #    ("Extrema (>12.5 mm/15min)", 12.5, float("inf")),
+        #]
+
+        precip_bins = [
+            ("Fraca (<5 mm/h equiv.)", 0.0, 1.25),
+            ("Moderada (5-25 mm/h equiv.)", 1.25, 6.25),
+            ("Forte (25-50 mm/h equiv.)", 6.25, 12.5),
+            ("Extrema (>50 mm/h equiv.)", 12.5, float("inf")),
+        ]
+
+        class_stats = {
+            label: {"se": 0.0, "ae": 0.0, "bias": 0.0, "n": 0}
+            for label, _, _ in precip_bins
+        }
+
         mask_land = self.util.get_mask_land().to(self.device)
         with torch.no_grad(): 
-            for batch_i, (inputs, target) in enumerate(self.data_loader):
-                inputs, target = inputs.to(self.device), target.to(self.device)
+            for batch_i, (inputs, target, mask) in enumerate(self.data_loader):
+                #inputs, target = inputs.to(self.device), target.to(self.device)
+                inputs = inputs.to(self.device)
+                target = target.to(self.device)
+                mask = mask.to(self.device)
                 output = self.model(inputs)
                 if is_chirps:
                     output = mask_land * output    
-                rmse_loss = self.loss_fn(output, target)
-                mae_loss = F.l1_loss(output, target)
+                #rmse_loss = self.loss_fn(output, target)
+                #mae_loss = F.l1_loss(output, target)
+                rmse_loss = self.loss_fn(output, target, mask)
+                mae_loss = (torch.abs(output - target) * mask).sum() / (mask.sum() + 1e-8)
+
                 cumulative_rmse += rmse_loss.item()
                 cumulative_mae += mae_loss.item()
+
+                if is_test:
+                    valid = mask == 1
+
+                    for label, low, high in precip_bins:
+                        if high == float("inf"):
+                            class_mask = valid & (target >= low)
+                        else:
+                            class_mask = valid & (target >= low) & (target < high)
+
+                        n = class_mask.sum().item()
+
+                        if n == 0:
+                            continue
+
+                        err = output[class_mask] - target[class_mask]
+
+                        class_stats[label]["se"] += torch.sum(err ** 2).item()
+                        class_stats[label]["ae"] += torch.sum(torch.abs(err)).item()
+                        class_stats[label]["bias"] += torch.sum(err).item()
+                        class_stats[label]["n"] += n
                 
                 if is_test:
                     #metric per observation (lat x lon) at each time step (t) 
                     for i in range(self.step):
-                        output_observation = output[:,:,i,:,:]
-                        target_observation = target[:,:,i,:,:]
-                        rmse_loss_obs = self.loss_fn(output_observation,target_observation)
-                        mae_loss_obs = F.l1_loss(output_observation, target_observation)
+                        #output_observation = output[:,:,i,:,:]
+                        #target_observation = target[:,:,i,:,:]
+                        #rmse_loss_obs = self.loss_fn(output_observation,target_observation)
+                        #mae_loss_obs = F.l1_loss(output_observation, target_observation)
+                        output_observation = output[:, :, i, :, :]
+                        target_observation = target[:, :, i, :, :]
+                        mask_observation = mask[:, :, i, :, :]
+
+                        rmse_loss_obs = self.loss_fn(
+                            output_observation,
+                            target_observation,
+                            mask_observation
+                        )
+
+                        mae_loss_obs = (
+                            torch.abs(output_observation - target_observation) * mask_observation
+                        ).sum() / (mask_observation.sum() + 1e-8)
+                        
                         observation_rmse[i] += rmse_loss_obs.item()
                         observation_mae[i] += mae_loss_obs.item()
         
@@ -144,6 +212,26 @@ class Evaluator:
                 print('MAE')
                 print(*np.divide(observation_mae, batch_i+1), sep = ",")
                 print('>>>>>>>>')  
+                print("\n>>>>>>>>> Metric by precipitation intensity")
+                for label, stats in class_stats.items():
+                    n = stats["n"]
+
+                    if n == 0:
+                        print(f"{label}: n=0")
+                        continue
+
+                    rmse = np.sqrt(stats["se"] / n)
+                    mae = stats["ae"] / n
+                    bias = stats["bias"] / n
+
+                    print(
+                        f"{label}: "
+                        f"n={n}, "
+                        f"RMSE={rmse:.4f}, "
+                        f"MAE={mae:.4f}",
+                        f"Bias={bias:.4f}"
+                    )
+                print(">>>>>>>>")
                 
         return cumulative_rmse/loader_size,cumulative_mae/loader_size
         

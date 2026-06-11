@@ -1,3 +1,6 @@
+# loader pra .npz
+from data.npz_sequence_dataset import NPZSequenceDataset
+
 import numpy as np
 import random as rd
 import xarray as xr
@@ -36,21 +39,41 @@ class MLBuilder:
         self.__define_seed(number)
         validation_split = 0.2
         test_split = 0.2
-        # Loading the dataset
-        ds = xr.open_mfdataset(self.dataset_file)
-        if (self.config.small_dataset):
-            ds = ds[dict(sample=slice(0,500))]
 
-        train_dataset = NetCDFDataset(ds, test_split=test_split, 
-                                      validation_split=validation_split,
-                                      first_output_channels=self.config.output_channels)
-        val_dataset   = NetCDFDataset(ds, test_split=test_split, 
-                                      validation_split=validation_split, is_validation=True,
-                                      first_output_channels=self.config.output_channels)
-        test_dataset  = NetCDFDataset(ds, test_split=test_split, 
-                                      validation_split=validation_split, is_test=True,
-                                      first_output_channels=self.config.output_channels)
-        if (self.config.verbose):
+        # Loading the dataset
+        if str(self.dataset_file).endswith(".npz"):
+            print(f"Usando NPZSequenceDataset a partir de: {self.dataset_file}")
+
+            train_dataset = NPZSequenceDataset(self.dataset_file, split="train")
+            val_dataset = NPZSequenceDataset(self.dataset_file, split="val")
+            test_dataset = NPZSequenceDataset(self.dataset_file, split="test")
+        else:
+            ds = xr.open_mfdataset(self.dataset_file)
+            if self.config.small_dataset:
+                ds = ds[dict(sample=slice(0, 500))]
+
+            train_dataset = NetCDFDataset(
+                ds,
+                test_split=test_split,
+                validation_split=validation_split,
+                first_output_channels=self.config.output_channels
+            )
+            val_dataset = NetCDFDataset(
+                ds,
+                test_split=test_split,
+                validation_split=validation_split,
+                is_validation=True,
+                first_output_channels=self.config.output_channels
+            )
+            test_dataset = NetCDFDataset(
+                ds,
+                test_split=test_split,
+                validation_split=validation_split,
+                is_test=True,
+                first_output_channels=self.config.output_channels
+            )
+
+        if self.config.verbose:
             print('[X_train] Shape:', train_dataset.X.shape)
             print('[y_train] Shape:', train_dataset.y.shape)
             print('[X_val] Shape:', val_dataset.X.shape)
@@ -58,15 +81,17 @@ class MLBuilder:
             print('[X_test] Shape:', test_dataset.X.shape)
             print('[y_test] Shape:', test_dataset.y.shape)
             print(f'Train on {len(train_dataset)} samples, validate on {len(val_dataset)} samples')
-                        
-        params = {'batch_size': self.config.batch, 
-                  'num_workers': self.config.workers, 
-                  'worker_init_fn': self.__init_seed}
 
-        train_loader = DataLoader(dataset=train_dataset, shuffle=True,**params)
-        val_loader = DataLoader(dataset=val_dataset, shuffle=False,**params)
+        params = {
+            'batch_size': self.config.batch,
+            'num_workers': self.config.workers,
+            'worker_init_fn': self.__init_seed
+        }
+
+        train_loader = DataLoader(dataset=train_dataset, shuffle=True, **params)
+        val_loader = DataLoader(dataset=val_dataset, shuffle=False, **params)
         test_loader = DataLoader(dataset=test_dataset, shuffle=False, **params)
-        
+
         models = {
             'stconvs2s-r': STConvS2S_R,
             'stconvs2s-c': STConvS2S_C,
@@ -85,38 +110,74 @@ class MLBuilder:
             'ablation-stconvs2s-r-notfactorized': AblationSTConvS2S_R_NotFactorized,
             'ablation-stconvs2s-c-notfactorized': AblationSTConvS2S_C_NotFactorized
         }
-        if not(self.config.model in models):
+        if not (self.config.model in models):
             raise ValueError(f'{self.config.model} is not a valid model name. Choose between: {models.keys()}')
-            quit()
-            
-        # Creating the model    
+
+        # Creating the model
         model_bulder = models[self.config.model]
-        # Pass both X and y shapes to handle different input/output channel counts
-        input_shape = train_dataset.X.shape
-        output_shape = train_dataset.y.shape
-        model = model_bulder(input_shape, self.config.num_layers, self.config.hidden_dim, 
-                             self.config.kernel_size, self.device, self.dropout_rate, int(self.step),
-                             output_channels=output_shape[1])
+
+        # Se for .npz, o shape bruto vem como [N, T, H, W, C]
+        # O modelo espera algo como [B, C, T, H, W]
+        if str(self.dataset_file).endswith(".npz"):
+            raw_shape = train_dataset.X.shape
+            _, T, H, W, C = raw_shape
+            input_shape = (1, C, T, H, W)
+
+            print("Shape bruto do dataset:", raw_shape)
+            print("Shape enviado ao modelo:", input_shape)
+
+            # Para datasets seq2seq RGB:
+            # y pode estar como [N, T_out, H, W, C]
+            # então output_shape[1] não é canal, é tempo.
+            # O número de canais de saída é o último eixo.
+            if len(train_dataset.y.shape) == 5:
+                output_channels = train_dataset.y.shape[-1]
+            elif len(train_dataset.y.shape) == 4:
+                output_channels = train_dataset.y.shape[-1]
+            else:
+                output_channels = None
+
+            model = model_bulder(
+                input_shape,
+                self.config.num_layers,
+                self.config.hidden_dim,
+                self.config.kernel_size,
+                self.device,
+                self.dropout_rate,
+                int(self.step),
+                output_channels=output_channels
+            )
+        else:
+            input_shape = train_dataset.X.shape
+            output_shape = train_dataset.y.shape
+            model = model_bulder(
+                input_shape,
+                self.config.num_layers,
+                self.config.hidden_dim,
+                self.config.kernel_size,
+                self.device,
+                self.dropout_rate,
+                int(self.step),
+                output_channels=output_shape[1]
+            )
+
         model.to(self.device)
+
         criterion = RMSELoss()
-        opt_params = {'lr': 0.001, 
-                      'alpha': 0.9, 
-                      'eps': 1e-6}
+        opt_params = {'lr': 0.001, 'alpha': 0.9, 'eps': 1e-6}
         optimizer = torch.optim.RMSprop(model.parameters(), **opt_params)
         util = Util(self.config.model, self.dataset_type, self.config.version, self.filename_prefix)
-        
+
         train_info = {'train_time': 0}
         if self.config.pre_trained is None:
-            train_info = self.__execute_learning(model, criterion, optimizer, train_loader,  val_loader, util) 
-                                                 
-        eval_info = self.__load_and_evaluate(model, criterion, optimizer, test_loader, 
-                                             train_info['train_time'], util)
+            train_info = self.__execute_learning(model, criterion, optimizer, train_loader, val_loader, util)
 
-        if (torch.cuda.is_available()):
+        eval_info = self.__load_and_evaluate(model, criterion, optimizer, test_loader, train_info['train_time'], util)
+
+        if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
         return {**train_info, **eval_info}
-
 
     def __execute_learning(self, model, criterion, optimizer, train_loader, val_loader, util):
         checkpoint_filename = util.get_checkpoint_filename()    
