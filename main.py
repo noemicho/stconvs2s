@@ -50,6 +50,8 @@ def get_arguments():
                         help='Custom path to dataset file (overrides --chirps)')
     parser.add_argument('--output-channels', type=int, dest='output_channels', default=None,
                         help='Number of output channels to use from y data')
+    parser.add_argument("--years", type=str, default="2022", 
+                        help="Anos usados no dataset memmap. Ex: 2022,2023 ou 2012-2024")
        
     return parser.parse_args()
     

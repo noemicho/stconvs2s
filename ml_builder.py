@@ -1,5 +1,7 @@
 # loader pra .npz
 from data.npz_sequence_dataset import NPZSequenceDataset
+# loader para dataset que é criado na hora do treino
+from data.radar_station_memmap_dataset import RadarStationMemmapDataset
 
 import numpy as np
 import random as rd
@@ -34,19 +36,64 @@ class MLBuilder:
         self.dataset_name, self.dataset_file = self.__get_dataset_file()
         self.dropout_rate = self.__get_dropout_rate()
         self.filename_prefix = self.dataset_name + '_step' + self.step
+
+    def __parse_years(self):
+        years_arg = self.config.years
+
+        if "-" in years_arg:
+            start, end = years_arg.split("-")
+            return list(range(int(start), int(end) + 1))
+
+        return [int(y.strip()) for y in years_arg.split(",")]
                 
     def run_model(self, number):
         self.__define_seed(number)
         validation_split = 0.2
         test_split = 0.2
 
+        if os.path.isdir(self.dataset_file):
+            print(f"Usando RadarStationMemmapDataset a partir de: {self.dataset_file}")
+
+            years = self.__parse_years()
+
+            train_dataset = RadarStationMemmapDataset(
+                radar_root=self.dataset_file,
+                years=years,
+                t_in=5,
+                t_out=5,
+                stride=int(self.step),
+                split="train",
+            )
+
+            val_dataset = RadarStationMemmapDataset(
+                radar_root=self.dataset_file,
+                years=years,
+                t_in=5,
+                t_out=5,
+                stride=int(self.step),
+                split="val",
+            )
+
+            test_dataset = RadarStationMemmapDataset(
+                radar_root=self.dataset_file,
+                years=years,
+                t_in=5,
+                t_out=5,
+                stride=int(self.step),
+                split="test",
+            )
+
+            dataset_kind = "memmap"
+    
         # Loading the dataset
-        if str(self.dataset_file).endswith(".npz"):
+        elif str(self.dataset_file).endswith(".npz"):
             print(f"Usando NPZSequenceDataset a partir de: {self.dataset_file}")
 
             train_dataset = NPZSequenceDataset(self.dataset_file, split="train")
             val_dataset = NPZSequenceDataset(self.dataset_file, split="val")
             test_dataset = NPZSequenceDataset(self.dataset_file, split="test")
+
+            dataset_kind = "npz"
         else:
             ds = xr.open_mfdataset(self.dataset_file)
             if self.config.small_dataset:
@@ -72,15 +119,26 @@ class MLBuilder:
                 is_test=True,
                 first_output_channels=self.config.output_channels
             )
+            dataset_kind = "netcdf"
 
         if self.config.verbose:
-            print('[X_train] Shape:', train_dataset.X.shape)
-            print('[y_train] Shape:', train_dataset.y.shape)
-            print('[X_val] Shape:', val_dataset.X.shape)
-            print('[y_val] Shape:', val_dataset.y.shape)
-            print('[X_test] Shape:', test_dataset.X.shape)
-            print('[y_test] Shape:', test_dataset.y.shape)
-            print(f'Train on {len(train_dataset)} samples, validate on {len(val_dataset)} samples')
+            print(f"Train samples: {len(train_dataset)}")
+            print(f"Val samples: {len(val_dataset)}")
+            print(f"Test samples: {len(test_dataset)}")
+
+            sample = train_dataset[0]
+
+            if len(sample) == 3:
+                sample_x, sample_y, sample_m = sample
+                print("Sample X:", sample_x.shape)
+                print("Sample Y:", sample_y.shape)
+                print("Sample M:", sample_m.shape)
+            else:
+                sample_x, sample_y = sample
+                print("Sample X:", sample_x.shape)
+                print("Sample Y:", sample_y.shape)
+
+            print(f"Train on {len(train_dataset)} samples, validate on {len(val_dataset)} samples")
 
         params = {
             'batch_size': self.config.batch,
@@ -114,30 +172,22 @@ class MLBuilder:
             raise ValueError(f'{self.config.model} is not a valid model name. Choose between: {models.keys()}')
 
         # Creating the model
-        model_bulder = models[self.config.model]
+        model_builder = models[self.config.model]
 
-        # Se for .npz, o shape bruto vem como [N, T, H, W, C]
-        # O modelo espera algo como [B, C, T, H, W]
-        if str(self.dataset_file).endswith(".npz"):
-            raw_shape = train_dataset.X.shape
-            _, T, H, W, C = raw_shape
+        if dataset_kind == "memmap":
+            sample_x, sample_y, sample_m = train_dataset[0]
+
+            # sample_x: [C, T, H, W]
+            C, T, H, W = sample_x.shape
             input_shape = (1, C, T, H, W)
 
-            print("Shape bruto do dataset:", raw_shape)
+            # sample_y: [C_out, T_out, H, W]
+            output_channels = sample_y.shape[0]
+
             print("Shape enviado ao modelo:", input_shape)
+            print("Output channels:", output_channels)
 
-            # Para datasets seq2seq RGB:
-            # y pode estar como [N, T_out, H, W, C]
-            # então output_shape[1] não é canal, é tempo.
-            # O número de canais de saída é o último eixo.
-            if len(train_dataset.y.shape) == 5:
-                output_channels = train_dataset.y.shape[-1]
-            elif len(train_dataset.y.shape) == 4:
-                output_channels = train_dataset.y.shape[-1]
-            else:
-                output_channels = None
-
-            model = model_bulder(
+            model = model_builder(
                 input_shape,
                 self.config.num_layers,
                 self.config.hidden_dim,
@@ -147,10 +197,38 @@ class MLBuilder:
                 int(self.step),
                 output_channels=output_channels
             )
+
+        elif dataset_kind == "npz":
+            raw_shape = train_dataset.X.shape
+            _, T, H, W, C = raw_shape
+            input_shape = (1, C, T, H, W)
+
+            print("Shape bruto do dataset:", raw_shape)
+            print("Shape enviado ao modelo:", input_shape)
+
+            if len(train_dataset.y.shape) == 5:
+                output_channels = train_dataset.y.shape[-1]
+            elif len(train_dataset.y.shape) == 4:
+                output_channels = train_dataset.y.shape[-1]
+            else:
+                output_channels = None
+
+            model = model_builder(
+                input_shape,
+                self.config.num_layers,
+                self.config.hidden_dim,
+                self.config.kernel_size,
+                self.device,
+                self.dropout_rate,
+                int(self.step),
+                output_channels=output_channels
+            )
+
         else:
             input_shape = train_dataset.X.shape
             output_shape = train_dataset.y.shape
-            model = model_bulder(
+
+            model = model_builder(
                 input_shape,
                 self.config.num_layers,
                 self.config.hidden_dim,
