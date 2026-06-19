@@ -295,13 +295,14 @@ class MLBuilder:
             time_per_epochs = train_time / (best_epoch + self.config.patience)
             print(f'Training time/epochs: {util.to_readable_time(time_per_epochs)} [{time_per_epochs}]')
         
-        test_rmse, test_mae = evaluator.eval(is_chirps=self.config.chirps)
-        print(f'Test RMSE: {test_rmse:.4f}\nTest MAE: {test_mae:.4f}')
+        test_rmse, test_mae, test_bias = evaluator.eval(is_chirps=self.config.chirps)
+        print(f'Test RMSE: {test_rmse:.4f}\nTest MAE: {test_mae:.4f}\nTest Bias: {test_bias:.4f}')
                         
         return {'best_epoch': best_epoch,
                 'val_rmse': val_loss,
                 'test_rmse': test_rmse,
                 'test_mae': test_mae,
+                'test_bias': test_bias,
                 'train_time_epochs': time_per_epochs
                 }
           

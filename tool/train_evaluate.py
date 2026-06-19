@@ -25,7 +25,7 @@ class Trainer:
         for epoch in range(1,self.epochs+1):
             train_loss = self.__train(is_chirps)
             evaluator = Evaluator(self.model, self.loss_fn, self.optimizer, self.val_loader, self.device, self.util)
-            val_loss,_ = evaluator.eval(is_test=False, is_chirps=is_chirps)
+            val_loss,_,_ = evaluator.eval(is_test=False, is_chirps=is_chirps)
             if (self.verbose):
                 print(f'Epoch: {epoch}/{self.epochs} - loss: {train_loss:.4f} - val_loss: {val_loss:.4f}')
             train_losses.append(train_loss)
@@ -118,7 +118,7 @@ class Evaluator:
     def eval(self, is_test=True, is_chirps=False):
         self.model.eval()
 
-        cumulative_rmse, cumulative_mae = 0.0, 0.0
+        cumulative_rmse, cumulative_mae, cumulative_bias = 0.0, 0.0, 0.0
         observation_rmse, observation_mae = [0]*self.step, [0]*self.step
         loader_size = len(self.data_loader)
 
@@ -155,9 +155,11 @@ class Evaluator:
                 #mae_loss = F.l1_loss(output, target)
                 rmse_loss = self.loss_fn(output, target, mask)
                 mae_loss = (torch.abs(output - target) * mask).sum() / (mask.sum() + 1e-8)
+                bias_loss = ((output - target) * mask).sum() / (mask.sum() + 1e-8)
 
                 cumulative_rmse += rmse_loss.item()
                 cumulative_mae += mae_loss.item()
+                cumulative_bias += bias_loss.item()
 
                 if is_test:
                     valid = mask == 1
@@ -205,7 +207,13 @@ class Evaluator:
                         observation_mae[i] += mae_loss_obs.item()
         
             if is_test:             
-                self.util.save_examples(inputs, target, output, self.step)
+                #self.util.save_examples(inputs, target, output, self.step)
+                self.util.save_examples(
+                    inputs.detach().cpu(),
+                    target.detach().cpu(),
+                    output.detach().cpu(),
+                    self.step
+                )
                 print('>>>>>>>>> Metric per observation (lat x lon) at each time step (t)')
                 print('RMSE')
                 print(*np.divide(observation_rmse, batch_i+1), sep = ",")
@@ -233,7 +241,11 @@ class Evaluator:
                     )
                 print(">>>>>>>>")
                 
-        return cumulative_rmse/loader_size,cumulative_mae/loader_size
+        return (
+            cumulative_rmse / loader_size,
+            cumulative_mae / loader_size,
+            cumulative_bias / loader_size
+        )
         
         
     def load_checkpoint(self, filename, dataset_type=None, model=None):
