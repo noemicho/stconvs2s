@@ -16,7 +16,9 @@ class RadarStationMemmapDataset(Dataset):
             radar_frames.dat
             radar_timestamps.npy
             metadata.json
-            stations_targets_masks.npz
+            Y_all.dat
+            M_all.dat
+            targets_metadata.json
         year=2023/
             ...
         year=2024/
@@ -53,7 +55,10 @@ class RadarStationMemmapDataset(Dataset):
 
             metadata_path = year_dir / "metadata.json"
             frames_path = year_dir / "radar_frames.dat"
-            targets_path = year_dir / "stations_targets_masks.npz"
+
+            targets_metadata_path = year_dir / "targets_metadata.json"
+            y_path = year_dir / "Y_all.dat"
+            m_path = year_dir / "M_all.dat"
 
             if not metadata_path.exists():
                 print(f"[AVISO] metadata não encontrado para {year}. Pulando.")
@@ -63,8 +68,17 @@ class RadarStationMemmapDataset(Dataset):
                 print(f"[AVISO] radar_frames.dat não encontrado para {year}. Pulando.")
                 continue
 
-            if not targets_path.exists():
-                print(f"[AVISO] stations_targets_masks.npz não encontrado para {year}. Pulando.")
+
+            if not targets_metadata_path.exists():
+                print(f"[AVISO] targets_metadata.json não encontrado para {year}. Pulando.")
+                continue
+
+            if not y_path.exists():
+                print(f"[AVISO] Y_all.dat não encontrado para {year}. Pulando.")
+                continue
+
+            if not m_path.exists():
+                print(f"[AVISO] M_all.dat não encontrado para {year}. Pulando.")
                 continue
 
             with open(metadata_path, "r", encoding="utf-8") as f:
@@ -79,15 +93,30 @@ class RadarStationMemmapDataset(Dataset):
                 shape=shape,
             )
 
-            target_data = np.load(targets_path, allow_pickle=True)
 
-            Y_all = target_data["Y_all"]
-            M_all = target_data["M_all"]
+            with open(targets_metadata_path, "r", encoding="utf-8") as f:
+                targets_metadata = json.load(f)
+
+            target_shape = tuple(targets_metadata["shape"])
+
+            Y_all = np.memmap(
+                y_path,
+                dtype=np.float32,
+                mode="r",
+                shape=target_shape,
+            )
+
+            M_all = np.memmap(
+                m_path,
+                dtype=np.uint8,
+                mode="r",
+                shape=target_shape,
+            )
 
             if len(frames) != len(Y_all) or len(frames) != len(M_all):
                 raise ValueError(
-                    f"Ano {year}: radar e Y_all têm tamanhos diferentes: "
-                    f"{len(frames)} vs {len(Y_all)}"
+                    f"Ano {year}: radar/Y/M têm tamanhos diferentes: "
+                    f"frames={len(frames)}, Y={len(Y_all)}, M={len(M_all)}"
                 )
 
             self.year_data[year] = {
