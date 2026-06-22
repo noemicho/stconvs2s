@@ -17,7 +17,7 @@ from model.ablation import *
  
 from tool.train_evaluate import Trainer, Evaluator
 from tool.dataset import NetCDFDataset
-from tool.loss import RMSELoss
+from tool.loss import RMSELoss, MaskedMAELoss
 from tool.utils import Util
 
 import torch
@@ -241,7 +241,7 @@ class MLBuilder:
 
         model.to(self.device)
 
-        criterion = RMSELoss()
+        criterion = MaskedMAELoss()
         opt_params = {'lr': 0.001, 'alpha': 0.9, 'eps': 1e-6}
         optimizer = torch.optim.RMSprop(model.parameters(), **opt_params)
         util = Util(self.config.model, self.dataset_type, self.config.version, self.filename_prefix)
