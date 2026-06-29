@@ -119,21 +119,16 @@ class Evaluator:
         self.model.eval()
 
         cumulative_rmse, cumulative_mae, cumulative_bias = 0.0, 0.0, 0.0
-        observation_rmse, observation_mae = [0]*self.step, [0]*self.step
+        observation_rmse = [0] * self.step
+        observation_mae = [0] * self.step
+        observation_bias = [0] * self.step
         loader_size = len(self.data_loader)
 
-        #precip_bins = [
-        #    ("Fraca (<1.25 mm/15min)", 0.0, 1.25),
-        #    ("Moderada (1.25-6.25 mm/15min)", 1.25, 6.25),
-        #    ("Forte (6.25-12.5 mm/15min)", 6.25, 12.5),
-        #    ("Extrema (>12.5 mm/15min)", 12.5, float("inf")),
-        #]
-
         precip_bins = [
-            ("Fraca (<5 mm/h equiv.)", 0.0, 1.25),
-            ("Moderada (5-25 mm/h equiv.)", 1.25, 6.25),
-            ("Forte (25-50 mm/h equiv.)", 6.25, 12.5),
-            ("Extrema (>50 mm/h equiv.)", 12.5, float("inf")),
+            ("Fraca (<1.25 mm/15min; <5 mm/h equiv.)", 0.0, 1.25),
+            ("Moderada (1.25-6.25 mm/15min; 5-25 mm/h equiv.)", 1.25, 6.25),
+            ("Forte (6.25-12.5 mm/15min; 25-50 mm/h equiv.)", 6.25, 12.5),
+            ("Extrema (>12.5 mm/15min; >50 mm/h equiv.)", 12.5, float("inf")),
         ]
 
         class_stats = {
@@ -142,20 +137,36 @@ class Evaluator:
         }
 
         mask_land = self.util.get_mask_land().to(self.device)
-        with torch.no_grad(): 
+
+        with torch.no_grad():
             for batch_i, (inputs, target, mask) in enumerate(self.data_loader):
-                #inputs, target = inputs.to(self.device), target.to(self.device)
                 inputs = inputs.to(self.device)
                 target = target.to(self.device)
                 mask = mask.to(self.device)
+
                 output = self.model(inputs)
+
                 if is_chirps:
-                    output = mask_land * output    
-                #rmse_loss = self.loss_fn(output, target)
-                #mae_loss = F.l1_loss(output, target)
-                rmse_loss = self.loss_fn(output, target, mask)
-                mae_loss = (torch.abs(output - target) * mask).sum() / (mask.sum() + 1e-8)
-                bias_loss = ((output - target) * mask).sum() / (mask.sum() + 1e-8)
+                    output = mask_land * output
+
+                # target e output estão em log1p(mm/15min)
+                # para métricas, volta para mm/15min
+                output_mm15 = torch.expm1(output)
+                target_mm15 = torch.expm1(target)
+
+                diff = output_mm15 - target_mm15
+
+                rmse_loss = torch.sqrt(
+                    ((diff ** 2) * mask).sum() / (mask.sum() + 1e-8)
+                )
+
+                mae_loss = (
+                    torch.abs(diff) * mask
+                ).sum() / (mask.sum() + 1e-8)
+
+                bias_loss = (
+                    diff * mask
+                ).sum() / (mask.sum() + 1e-8)
 
                 cumulative_rmse += rmse_loss.item()
                 cumulative_mae += mae_loss.item()
@@ -166,60 +177,63 @@ class Evaluator:
 
                     for label, low, high in precip_bins:
                         if high == float("inf"):
-                            class_mask = valid & (target >= low)
+                            class_mask = valid & (target_mm15 >= low)
                         else:
-                            class_mask = valid & (target >= low) & (target < high)
+                            class_mask = valid & (target_mm15 >= low) & (target_mm15 < high)
 
                         n = class_mask.sum().item()
 
                         if n == 0:
                             continue
 
-                        err = output[class_mask] - target[class_mask]
+                        err = output_mm15[class_mask] - target_mm15[class_mask]
 
                         class_stats[label]["se"] += torch.sum(err ** 2).item()
                         class_stats[label]["ae"] += torch.sum(torch.abs(err)).item()
                         class_stats[label]["bias"] += torch.sum(err).item()
                         class_stats[label]["n"] += n
-                
-                if is_test:
-                    #metric per observation (lat x lon) at each time step (t) 
+
                     for i in range(self.step):
-                        #output_observation = output[:,:,i,:,:]
-                        #target_observation = target[:,:,i,:,:]
-                        #rmse_loss_obs = self.loss_fn(output_observation,target_observation)
-                        #mae_loss_obs = F.l1_loss(output_observation, target_observation)
-                        output_observation = output[:, :, i, :, :]
-                        target_observation = target[:, :, i, :, :]
+                        output_observation = output_mm15[:, :, i, :, :]
+                        target_observation = target_mm15[:, :, i, :, :]
                         mask_observation = mask[:, :, i, :, :]
 
-                        rmse_loss_obs = self.loss_fn(
-                            output_observation,
-                            target_observation,
-                            mask_observation
+                        diff_obs = output_observation - target_observation
+
+                        rmse_loss_obs = torch.sqrt(
+                            ((diff_obs ** 2) * mask_observation).sum()
+                            / (mask_observation.sum() + 1e-8)
                         )
 
                         mae_loss_obs = (
-                            torch.abs(output_observation - target_observation) * mask_observation
+                            torch.abs(diff_obs) * mask_observation
                         ).sum() / (mask_observation.sum() + 1e-8)
-                        
+
+                        bias_loss_obs = (
+                            diff_obs * mask_observation
+                        ).sum() / (mask_observation.sum() + 1e-8)
+
                         observation_rmse[i] += rmse_loss_obs.item()
                         observation_mae[i] += mae_loss_obs.item()
-        
-            if is_test:             
-                #self.util.save_examples(inputs, target, output, self.step)
+                        observation_bias[i] += bias_loss_obs.item()
+
+            if is_test:
                 self.util.save_examples(
                     inputs.detach().cpu(),
-                    target.detach().cpu(),
-                    output.detach().cpu(),
+                    target_mm15.detach().cpu(),
+                    output_mm15.detach().cpu(),
                     self.step
                 )
+
                 print('>>>>>>>>> Metric per observation (lat x lon) at each time step (t)')
-                print('RMSE')
-                print(*np.divide(observation_rmse, batch_i+1), sep = ",")
-                print('MAE')
-                print(*np.divide(observation_mae, batch_i+1), sep = ",")
-                print('>>>>>>>>')  
+                print('RMSE (mm/15min)')
+                print(*np.divide(observation_rmse, batch_i + 1), sep=",")
+                print('MAE (mm/15min)')
+                print(*np.divide(observation_mae, batch_i + 1), sep=",")
+                print('Bias (mm/15min)')
+                print(*np.divide(observation_bias, batch_i + 1), sep=",")
+                print('>>>>>>>>')
+
                 print("\n>>>>>>>>> Metric by precipitation intensity")
                 for label, stats in class_stats.items():
                     n = stats["n"]
@@ -235,18 +249,17 @@ class Evaluator:
                     print(
                         f"{label}: "
                         f"n={n}, "
-                        f"RMSE={rmse:.4f}, "
-                        f"MAE={mae:.4f}",
-                        f"Bias={bias:.4f}"
+                        f"RMSE={rmse:.4f} mm/15min, "
+                        f"MAE={mae:.4f} mm/15min, "
+                        f"Bias={bias:.4f} mm/15min"
                     )
                 print(">>>>>>>>")
-                
+
         return (
             cumulative_rmse / loader_size,
             cumulative_mae / loader_size,
             cumulative_bias / loader_size
         )
-        
         
     def load_checkpoint(self, filename, dataset_type=None, model=None):
         if not(os.path.isabs(filename)):
