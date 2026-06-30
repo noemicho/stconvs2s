@@ -151,7 +151,9 @@ class Evaluator:
 
                 # target e output estão em log1p(mm/15min)
                 # para métricas, volta para mm/15min
-                output_mm15 = torch.expm1(output)
+                #output_mm15 = torch.expm1(output)
+                # evitar valores negativos
+                output_mm15 = torch.clamp(torch.expm1(output), min=0.0)
                 target_mm15 = torch.expm1(target)
 
                 diff = output_mm15 - target_mm15
