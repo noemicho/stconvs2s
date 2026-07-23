@@ -149,12 +149,67 @@ class Evaluator:
                 if is_chirps:
                     output = mask_land * output
 
+                # Debug somente no primeiro batch do teste final
+                if is_test and batch_i == 0:
+                    print("\n========== DEBUG PRIMEIRO BATCH ==========")
+                    print(f"inputs.shape: {tuple(inputs.shape)}")
+                    print(f"target.shape: {tuple(target.shape)}")
+                    print(f"mask.shape:   {tuple(mask.shape)}")
+                    print(f"output.shape: {tuple(output.shape)}")
+                    print()
+                    print("Ordem: [batch, canal, tempo, altura, largura]")
+                    print(f"Batch:            eixo 0, tamanho {inputs.shape[0]}")
+                    print(f"Canais de input:  eixo 1, tamanho {inputs.shape[1]}")
+                    print(f"Canais do target: eixo 1, tamanho {target.shape[1]}")
+                    print(f"Canais do output: eixo 1, tamanho {output.shape[1]}")
+                    print(f"Tempo de input:   eixo 2, tamanho {inputs.shape[2]}")
+                    print(f"Tempo de saída:   eixo 2, tamanho {target.shape[2]}")
+                    print(f"Altura:           eixo 3, tamanho {target.shape[3]}")
+                    print(f"Largura:          eixo 4, tamanho {target.shape[4]}")
+                    print("===========================================\n")
+
                 # target e output estão em log1p(mm/15min)
                 # para métricas, volta para mm/15min
                 #output_mm15 = torch.expm1(output)
                 # evitar valores negativos
                 output_mm15 = torch.clamp(torch.expm1(output), min=0.0)
                 target_mm15 = torch.expm1(target)
+
+                if is_test and batch_i == 0:
+                    print("\n===== ESTATÍSTICAS POR HORIZONTE =====")
+
+                    for t in range(target_mm15.shape[2]):
+                        target_t = target_mm15[:, :, t, :, :]
+                        output_t = output_mm15[:, :, t, :, :]
+                        mask_t = mask[:, :, t, :, :]
+
+                        valid = mask_t == 1
+                        target_valid = target_t[valid]
+                        output_valid = output_t[valid]
+
+                        print(f"\nt+{t + 1}:")
+                        print(f"  target shape: {tuple(target_t.shape)}")
+                        print(f"  output shape: {tuple(output_t.shape)}")
+                        print(f"  pontos válidos: {valid.sum().item()}")
+
+                        if valid.any():
+                            print(
+                                f"  target: "
+                                f"min={target_valid.min().item():.4f}, "
+                                f"max={target_valid.max().item():.4f}, "
+                                f"mean={target_valid.mean().item():.4f}, "
+                                f"std={target_valid.std().item():.4f}"
+                            )
+
+                            print(
+                                f"  output: "
+                                f"min={output_valid.min().item():.4f}, "
+                                f"max={output_valid.max().item():.4f}, "
+                                f"mean={output_valid.mean().item():.4f}, "
+                                f"std={output_valid.std().item():.4f}"
+                            )
+
+                    print("=======================================\n")
 
                 diff = output_mm15 - target_mm15
 
