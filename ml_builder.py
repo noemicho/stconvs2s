@@ -17,7 +17,13 @@ from model.ablation import *
  
 from tool.train_evaluate import Trainer, Evaluator
 from tool.dataset import NetCDFDataset
-from tool.loss import RMSELoss, MaskedMAELoss
+from tool.loss import (
+    RMSELoss,
+    MaskedMAELoss,
+    MaskedHuberLoss,
+    WeightedMaskedMAELoss,
+    WeightedMaskedHuberLoss,
+)
 from tool.utils import Util
 
 import torch
@@ -241,7 +247,8 @@ class MLBuilder:
 
         model.to(self.device)
 
-        criterion = MaskedMAELoss()
+        criterion = self.__get_loss()
+        print(f"Loss function: {criterion.__class__.__name__}")
         opt_params = {'lr': 0.001, 'alpha': 0.9, 'eps': 1e-6}
         optimizer = torch.optim.RMSprop(model.parameters(), **opt_params)
         util = Util(self.config.model, self.dataset_type, self.config.version, self.filename_prefix)
@@ -319,6 +326,40 @@ class MLBuilder:
     def __init_seed(self, number):
         seed = (number * 10) + 1000
         np.random.seed(seed)
+
+    def __get_loss(self):
+        loss_name = self.config.loss
+
+        if loss_name == 'masked-mae':
+            return MaskedMAELoss()
+
+        if loss_name == 'masked-huber':
+            return MaskedHuberLoss(delta=self.config.huber_delta)
+
+        if loss_name == 'weighted-mae':
+            return WeightedMaskedMAELoss(class_weights=self.__parse_loss_weights())
+
+        if loss_name == 'weighted-huber':
+            return WeightedMaskedHuberLoss(
+                delta=self.config.huber_delta,
+                class_weights=self.__parse_loss_weights()
+            )
+
+        raise ValueError(f'{loss_name} is not a valid loss name')
+
+    def __parse_loss_weights(self):
+        try:
+            weights = [float(value.strip()) for value in self.config.loss_weights.split(',')]
+        except ValueError:
+            raise ValueError('--loss-weights must contain numeric comma-separated values')
+
+        if len(weights) != 4:
+            raise ValueError('--loss-weights must contain four values: weak,moderate,strong,extreme')
+
+        if any(weight <= 0 for weight in weights):
+            raise ValueError('--loss-weights values must be positive')
+
+        return weights
         
     def __get_dataset_file(self):
         if self.config.dataset_path is not None:

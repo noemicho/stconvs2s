@@ -50,6 +50,13 @@ def get_arguments():
                         help='Custom path to dataset file (overrides --chirps)')
     parser.add_argument('--output-channels', type=int, dest='output_channels', default=None,
                         help='Number of output channels to use from y data')
+    parser.add_argument('--loss', default='masked-mae',
+                        choices=['masked-mae', 'masked-huber', 'weighted-mae', 'weighted-huber'],
+                        help='Loss function used for training')
+    parser.add_argument('--huber-delta', type=float, dest='huber_delta', default=0.1,
+                        help='Delta parameter for Huber-based losses')
+    parser.add_argument('--loss-weights', default='1,5,10,20', dest='loss_weights',
+                        help='Comma-separated weights for weak, moderate, strong, extreme precipitation')
     parser.add_argument("--years", type=str, default="2022", 
                         help="Anos usados no dataset memmap. Ex: 2022,2023 ou 2012-2024")
        
