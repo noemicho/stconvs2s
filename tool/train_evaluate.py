@@ -138,6 +138,13 @@ class Evaluator:
 
         mask_land = self.util.get_mask_land().to(self.device)
 
+        # Armazena poucos batches do conjunto de teste para análise numérica
+        pred_batches = []
+        target_batches = []
+        mask_batches = []
+
+        max_batches_to_save = 5
+
         with torch.no_grad():
             for batch_i, (inputs, target, mask) in enumerate(self.data_loader):
                 inputs = inputs.to(self.device)
@@ -174,6 +181,18 @@ class Evaluator:
                 # evitar valores negativos
                 output_mm15 = torch.clamp(torch.expm1(output), min=0.0)
                 target_mm15 = torch.expm1(target)
+
+                # Salva somente alguns batches do teste final
+                if is_test and batch_i < max_batches_to_save:
+                    pred_batches.append(
+                        output_mm15.detach().cpu().numpy()
+                    )
+                    target_batches.append(
+                        target_mm15.detach().cpu().numpy()
+                    )
+                    mask_batches.append(
+                        mask.detach().cpu().numpy()
+                    )
 
                 if is_test and batch_i == 0:
                     print("\n===== ESTATÍSTICAS POR HORIZONTE =====")
@@ -275,6 +294,50 @@ class Evaluator:
                         observation_bias[i] += bias_loss_obs.item()
 
             if is_test:
+                # Junta os batches no eixo das amostras
+                outputs_pred = np.concatenate(pred_batches, axis=0)
+                outputs_target = np.concatenate(target_batches, axis=0)
+                outputs_mask = np.concatenate(mask_batches, axis=0)
+
+                # Cria uma pasta específica para os exemplos numéricos
+                output_dir = os.path.join(
+                    "output",
+                    "numeric_examples"
+                )
+                os.makedirs(output_dir, exist_ok=True)
+
+                pred_path = os.path.join(
+                    output_dir,
+                    "outputs_pred_mm15.npy"
+                )
+                target_path = os.path.join(
+                    output_dir,
+                    "outputs_target_mm15.npy"
+                )
+                mask_path = os.path.join(
+                    output_dir,
+                    "outputs_mask.npy"
+                )
+
+                np.save(pred_path, outputs_pred)
+                np.save(target_path, outputs_target)
+                np.save(mask_path, outputs_mask)
+
+                print("\n===== EXEMPLOS NUMÉRICOS SALVOS =====")
+                print(f"Previsões: {pred_path}")
+                print(f"Shape: {outputs_pred.shape}")
+                print(f"Alvos: {target_path}")
+                print(f"Shape: {outputs_target.shape}")
+                print(f"Máscaras: {mask_path}")
+                print(f"Shape: {outputs_mask.shape}")
+                print("Unidade: mm/15min")
+                print(
+                    "Ordem dos eixos: "
+                    "[amostra, canal, horizonte, altura, largura]"
+                )
+                print("=====================================\n")
+
+                ########
                 self.util.save_examples(
                     inputs.detach().cpu(),
                     target_mm15.detach().cpu(),
