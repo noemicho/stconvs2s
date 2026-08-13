@@ -57,6 +57,10 @@ def get_arguments():
                         help='Delta parameter for Huber-based losses')
     parser.add_argument('--loss-weights', default='1,5,10,20', dest='loss_weights',
                         help='Comma-separated weights for weak, moderate, strong, extreme precipitation')
+    parser.add_argument('--balanced-sampler', action='store_true', dest='balanced_sampler',
+                        help='Use a weighted sampler to balance training samples by precipitation intensity')
+    parser.add_argument('--sampler-thresholds', default='1.25,6.25,12.5', dest='sampler_thresholds',
+                        help='Comma-separated mm/15min thresholds for moderate, strong, extreme sample classes')
     parser.add_argument("--years", type=str, default="2022", 
                         help="Anos usados no dataset memmap. Ex: 2022,2023 ou 2012-2024")
        

@@ -4,6 +4,80 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
+
+PRECIP_BINS = [
+    ("Fraca (<1.25 mm/15min; <5 mm/h equiv.)", 0.0, 1.25),
+    ("Moderada (1.25-6.25 mm/15min; 5-25 mm/h equiv.)", 1.25, 6.25),
+    ("Forte (6.25-12.5 mm/15min; 25-50 mm/h equiv.)", 6.25, 12.5),
+    ("Extrema (>12.5 mm/15min; >50 mm/h equiv.)", 12.5, float("inf")),
+]
+
+
+def create_metric_stats(precip_bins=PRECIP_BINS, step=None):
+    stats = {}
+
+    for label, _, _ in precip_bins:
+        if step is None:
+            stats[label] = {"se": 0.0, "ae": 0.0, "bias": 0.0, "n": 0}
+        else:
+            stats[label] = [
+                {"se": 0.0, "ae": 0.0, "bias": 0.0, "n": 0}
+                for _ in range(step)
+            ]
+
+    return stats
+
+
+def update_metric_stats(stats, output_mm15, target_mm15, mask, precip_bins=PRECIP_BINS, horizon=None):
+    valid = mask == 1
+
+    for label, low, high in precip_bins:
+        if high == float("inf"):
+            class_mask = valid & (target_mm15 >= low)
+        else:
+            class_mask = valid & (target_mm15 >= low) & (target_mm15 < high)
+
+        n = class_mask.sum().item()
+
+        if n == 0:
+            continue
+
+        err = output_mm15[class_mask] - target_mm15[class_mask]
+        target_stats = stats[label] if horizon is None else stats[label][horizon]
+        target_stats["se"] += torch.sum(err ** 2).item()
+        target_stats["ae"] += torch.sum(torch.abs(err)).item()
+        target_stats["bias"] += torch.sum(err).item()
+        target_stats["n"] += n
+
+
+def metric_rows_from_stats(stats, split="test"):
+    rows = []
+
+    for label, value in stats.items():
+        horizon_stats = value if isinstance(value, list) else [value]
+
+        for horizon_idx, item in enumerate(horizon_stats):
+            n = item["n"]
+            row = {
+                "split": split,
+                "precipitation_bin": label,
+                "horizon": horizon_idx + 1 if isinstance(value, list) else "",
+                "n": n,
+                "rmse": "",
+                "mae": "",
+                "bias": "",
+            }
+
+            if n > 0:
+                row["rmse"] = float(np.sqrt(item["se"] / n))
+                row["mae"] = float(item["ae"] / n)
+                row["bias"] = float(item["bias"] / n)
+
+            rows.append(row)
+
+    return rows
+
+
 class Trainer:
     
     def __init__(self, model, loss_fn, optimizer, train_loader, val_loader, 
@@ -124,17 +198,8 @@ class Evaluator:
         observation_bias = [0] * self.step
         loader_size = len(self.data_loader)
 
-        precip_bins = [
-            ("Fraca (<1.25 mm/15min; <5 mm/h equiv.)", 0.0, 1.25),
-            ("Moderada (1.25-6.25 mm/15min; 5-25 mm/h equiv.)", 1.25, 6.25),
-            ("Forte (6.25-12.5 mm/15min; 25-50 mm/h equiv.)", 6.25, 12.5),
-            ("Extrema (>12.5 mm/15min; >50 mm/h equiv.)", 12.5, float("inf")),
-        ]
-
-        class_stats = {
-            label: {"se": 0.0, "ae": 0.0, "bias": 0.0, "n": 0}
-            for label, _, _ in precip_bins
-        }
+        class_stats = create_metric_stats()
+        class_horizon_stats = create_metric_stats(step=self.step)
 
         mask_land = self.util.get_mask_land().to(self.device)
 
@@ -230,25 +295,7 @@ class Evaluator:
                 cumulative_bias += bias_loss.item()
 
                 if is_test:
-                    valid = mask == 1
-
-                    for label, low, high in precip_bins:
-                        if high == float("inf"):
-                            class_mask = valid & (target_mm15 >= low)
-                        else:
-                            class_mask = valid & (target_mm15 >= low) & (target_mm15 < high)
-
-                        n = class_mask.sum().item()
-
-                        if n == 0:
-                            continue
-
-                        err = output_mm15[class_mask] - target_mm15[class_mask]
-
-                        class_stats[label]["se"] += torch.sum(err ** 2).item()
-                        class_stats[label]["ae"] += torch.sum(torch.abs(err)).item()
-                        class_stats[label]["bias"] += torch.sum(err).item()
-                        class_stats[label]["n"] += n
+                    update_metric_stats(class_stats, output_mm15, target_mm15, mask)
 
                     for i in range(self.step):
                         output_observation = output_mm15[:, :, i, :, :]
@@ -273,6 +320,13 @@ class Evaluator:
                         observation_rmse[i] += rmse_loss_obs.item()
                         observation_mae[i] += mae_loss_obs.item()
                         observation_bias[i] += bias_loss_obs.item()
+                        update_metric_stats(
+                            class_horizon_stats,
+                            output_observation,
+                            target_observation,
+                            mask_observation,
+                            horizon=i
+                        )
 
             if is_test:
                 self.util.save_examples(
@@ -311,6 +365,29 @@ class Evaluator:
                         f"Bias={bias:.4f} mm/15min"
                     )
                 print(">>>>>>>>")
+
+                print("\n>>>>>>>>> Metric by precipitation intensity and horizon")
+                class_horizon_rows = metric_rows_from_stats(class_horizon_stats)
+                for row in class_horizon_rows:
+                    if row["n"] == 0:
+                        print(
+                            f'{row["precipitation_bin"]} | '
+                            f't+{row["horizon"]}: n=0'
+                        )
+                        continue
+
+                    print(
+                        f'{row["precipitation_bin"]} | '
+                        f't+{row["horizon"]}: '
+                        f'n={row["n"]}, '
+                        f'RMSE={row["rmse"]:.4f} mm/15min, '
+                        f'MAE={row["mae"]:.4f} mm/15min, '
+                        f'Bias={row["bias"]:.4f} mm/15min'
+                    )
+                print(">>>>>>>>")
+
+                if self.util is not None:
+                    self.util.save_metrics(class_horizon_rows, "intensity_horizon")
 
         return (
             cumulative_rmse / loader_size,

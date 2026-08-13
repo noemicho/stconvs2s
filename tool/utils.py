@@ -3,6 +3,7 @@ import pandas as pd
 import smtplib
 import os
 import time as tm
+import csv
 from datetime import datetime
 from configparser import ConfigParser
 from pathlib import Path
@@ -84,6 +85,19 @@ class Util:
             val_filename = os.path.join(val_dir, self.base_filename + '.txt')
             np.savetxt(train_filename, train_losses, delimiter=",", fmt='%g')
             np.savetxt(val_filename, val_losses, delimiter=",", fmt='%g')
+
+    def save_metrics(self, rows, name):
+        if not rows:
+            return
+
+        metrics_dir = self.__create_dir('metrics')
+        filename = os.path.join(metrics_dir, self.base_filename + '_' + name + '.csv')
+        fieldnames = list(rows[0].keys())
+
+        with open(filename, "w", newline="", encoding="utf-8") as file:
+            writer = csv.DictWriter(file, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
             
     def save_examples(self, inputs, target, output, step):
         input_seq_length = inputs.shape[2]

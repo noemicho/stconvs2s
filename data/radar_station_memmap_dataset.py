@@ -49,6 +49,7 @@ class RadarStationMemmapDataset(Dataset):
 
         self.year_data = {}
         self.samples = []
+        self._sample_class_cache = {}
 
         for year in years:
             year_dir = self.radar_root / f"year={year}"
@@ -160,6 +161,53 @@ class RadarStationMemmapDataset(Dataset):
 
     def __len__(self):
         return len(self.samples)
+
+    def get_sample_precipitation_classes(self, thresholds=(1.25, 6.25, 12.5)):
+        """
+        Classifica cada amostra pela maior precipitacao observada no horizonte de saida.
+
+        Classes:
+            0: sem observacao valida ou chuva fraca
+            1: chuva moderada
+            2: chuva forte
+            3: chuva extrema
+        """
+        thresholds = tuple(float(value) for value in thresholds)
+
+        if thresholds in self._sample_class_cache:
+            return self._sample_class_cache[thresholds].copy()
+
+        classes = np.zeros(len(self.samples), dtype=np.int64)
+
+        for idx, (year, start_idx) in enumerate(self.samples):
+            classes[idx] = self._classify_sample(year, start_idx, thresholds)
+
+        self._sample_class_cache[thresholds] = classes
+        return classes.copy()
+
+    def get_balanced_sample_weights(self, thresholds=(1.25, 6.25, 12.5)):
+        classes = self.get_sample_precipitation_classes(thresholds)
+        counts = np.bincount(classes, minlength=4).astype(np.float64)
+        weights_by_class = np.zeros_like(counts, dtype=np.float64)
+        nonzero = counts > 0
+        weights_by_class[nonzero] = 1.0 / counts[nonzero]
+        return weights_by_class[classes].astype(np.float64), counts.astype(np.int64)
+
+    def _classify_sample(self, year, start_idx, thresholds):
+        data = self.year_data[year]
+
+        y_start = start_idx + self.t_in
+        y_end = y_start + self.t_out
+
+        target_log = np.array(data["Y_all"][y_start:y_end], dtype=np.float32)
+        mask = np.array(data["M_all"][y_start:y_end], dtype=np.float32)
+
+        valid = mask > 0
+        if not np.any(valid):
+            return 0
+
+        max_precip = np.expm1(target_log[valid]).max()
+        return int(np.searchsorted(thresholds, max_precip, side="right"))
 
     def __getitem__(self, idx):
         year, start_idx = self.samples[idx]
