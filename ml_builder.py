@@ -59,6 +59,7 @@ class MLBuilder:
 
         if os.path.isdir(self.dataset_file):
             print(f"Usando RadarStationMemmapDataset a partir de: {self.dataset_file}")
+            print(f"Fonte dos targets: {self.config.target_source}")
 
             years = self.__parse_years()
 
@@ -69,6 +70,7 @@ class MLBuilder:
                 t_out=5,
                 stride=int(self.step),
                 split="train",
+                target_source=self.config.target_source,
             )
 
             val_dataset = RadarStationMemmapDataset(
@@ -78,6 +80,7 @@ class MLBuilder:
                 t_out=5,
                 stride=int(self.step),
                 split="val",
+                target_source=self.config.target_source,
             )
 
             test_dataset = RadarStationMemmapDataset(
@@ -87,6 +90,7 @@ class MLBuilder:
                 t_out=5,
                 stride=int(self.step),
                 split="test",
+                target_source=self.config.target_source,
             )
 
             dataset_kind = "memmap"

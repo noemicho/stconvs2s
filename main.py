@@ -59,6 +59,8 @@ def get_arguments():
                         help='Comma-separated weights for weak, moderate, strong, extreme precipitation')
     parser.add_argument("--years", type=str, default="2022", 
                         help="Anos usados no dataset memmap. Ex: 2022,2023 ou 2012-2024")
+    parser.add_argument("--target-source", type=str, dest="target_source", default="alertario", choices=["alertario", "websirene"],
+                        help="Fonte dos dados de precipitação das estações.")
        
     return parser.parse_args()
     
