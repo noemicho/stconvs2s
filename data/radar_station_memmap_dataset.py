@@ -5,9 +5,19 @@ import torch
 from torch.utils.data import Dataset
 
 
+TARGET_METADATA_FILES = {
+    "websirene": "targets_metadata.json",
+    "alertario": "targets_alertario_metadata.json",
+}
+
+
 class RadarStationMemmapDataset(Dataset):
     """
     Dataset PyTorch para radar + estações usando memmap.
+
+    Fontes suportadas:
+    - websirene
+    - alertario
 
     Estrutura esperada:
 
@@ -16,13 +26,16 @@ class RadarStationMemmapDataset(Dataset):
             radar_frames.dat
             radar_timestamps.npy
             metadata.json
+
+            # WebSirene
             Y_all.dat
             M_all.dat
             targets_metadata.json
-        year=2023/
-            ...
-        year=2024/
-            ...
+
+            # Alerta Rio
+            Y_alertario.dat
+            M_alertario.dat
+            targets_alertario_metadata.json
 
     Retorna:
         x: [C, T_in, H, W]
@@ -40,12 +53,20 @@ class RadarStationMemmapDataset(Dataset):
         split="train",
         train_ratio=0.6,
         val_ratio=0.2,
+        target_source="alertario",
     ):
         self.radar_root = Path(radar_root)
         self.years = years
         self.t_in = t_in
         self.t_out = t_out
         self.stride = stride
+        self.target_source = target_source.lower()
+
+        if self.target_source not in TARGET_METADATA_FILES:
+            raise ValueError(
+                f"Fonte inválida: {self.target_source}. "
+                f"Opções disponíveis: {list(TARGET_METADATA_FILES.keys())}"
+            )
 
         self.year_data = {}
         self.samples = []
@@ -57,9 +78,9 @@ class RadarStationMemmapDataset(Dataset):
             metadata_path = year_dir / "metadata.json"
             frames_path = year_dir / "radar_frames.dat"
 
-            targets_metadata_path = year_dir / "targets_metadata.json"
-            y_path = year_dir / "Y_all.dat"
-            m_path = year_dir / "M_all.dat"
+            targets_metadata_path = (
+                year_dir / TARGET_METADATA_FILES[self.target_source]
+            )
 
             if not metadata_path.exists():
                 print(f"[AVISO] metadata não encontrado para {year}. Pulando.")
@@ -69,17 +90,31 @@ class RadarStationMemmapDataset(Dataset):
                 print(f"[AVISO] radar_frames.dat não encontrado para {year}. Pulando.")
                 continue
 
-
             if not targets_metadata_path.exists():
-                print(f"[AVISO] targets_metadata.json não encontrado para {year}. Pulando.")
+                print(
+                    f"[AVISO] {targets_metadata_path.name} "
+                    f"não encontrado para {year}. Pulando."
+                )
                 continue
 
+            with open(targets_metadata_path, "r", encoding="utf-8") as f:
+                targets_metadata = json.load(f)
+
+            y_path = year_dir / targets_metadata["Y_file"]
+            m_path = year_dir / targets_metadata["M_file"]
+
             if not y_path.exists():
-                print(f"[AVISO] Y_all.dat não encontrado para {year}. Pulando.")
+                print(
+                    f"[AVISO] {y_path.name} "
+                    f"não encontrado para {year}. Pulando."
+                )
                 continue
 
             if not m_path.exists():
-                print(f"[AVISO] M_all.dat não encontrado para {year}. Pulando.")
+                print(
+                    f"[AVISO] {m_path.name} "
+                    f"não encontrado para {year}. Pulando."
+                )
                 continue
 
             with open(metadata_path, "r", encoding="utf-8") as f:
@@ -93,10 +128,6 @@ class RadarStationMemmapDataset(Dataset):
                 mode="r",
                 shape=shape,
             )
-
-
-            with open(targets_metadata_path, "r", encoding="utf-8") as f:
-                targets_metadata = json.load(f)
 
             target_shape = tuple(targets_metadata["shape"])
 
@@ -131,6 +162,7 @@ class RadarStationMemmapDataset(Dataset):
 
             print(
                 f"[{split}] Ano {year} carregado | "
+                f"fonte={self.target_source} | "
                 f"frames={n_frames} | "
                 f"shape={shape} | "
                 f"amostras possíveis={max(n_possible, 0)}",
