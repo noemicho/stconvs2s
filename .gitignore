@@ -3,3 +3,6 @@
 *.hdf
 *.nc
 **/dask-worker-space
+data/*
+!data/.gitkeep
+!data/chirps_mask_land.npy

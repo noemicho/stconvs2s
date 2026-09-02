@@ -1,7 +1,4 @@
-# loader pra .npz
-from data.npz_sequence_dataset import NPZSequenceDataset
-# loader para dataset que é criado na hora do treino
-from data.radar_station_memmap_dataset import RadarStationMemmapDataset
+from stconvs2s_datasets import NPZSequenceDataset, RadarStationMemmapDataset
 
 import numpy as np
 import random as rd

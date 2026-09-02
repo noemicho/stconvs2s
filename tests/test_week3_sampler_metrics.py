@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from data.radar_station_memmap_dataset import RadarStationMemmapDataset
+from stconvs2s_datasets import RadarStationMemmapDataset
 from tool.train_evaluate import (
     create_metric_stats,
     metric_rows_from_stats,
