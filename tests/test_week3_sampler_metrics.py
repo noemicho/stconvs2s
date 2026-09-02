@@ -78,7 +78,14 @@ class Week3SamplerMetricsTest(unittest.TestCase):
             json.dump({"shape": frame_shape}, file)
 
         with open(year_dir / "targets_metadata.json", "w", encoding="utf-8") as file:
-            json.dump({"shape": target_shape}, file)
+            json.dump(
+                {
+                    "shape": target_shape,
+                    "Y_file": "Y_all.dat",
+                    "M_file": "M_all.dat",
+                },
+                file,
+            )
 
         frames = np.memmap(
             year_dir / "radar_frames.dat",
@@ -123,6 +130,7 @@ class Week3SamplerMetricsTest(unittest.TestCase):
             split="train",
             train_ratio=1.0,
             val_ratio=0.0,
+            target_source="websirene",
         )
 
 
