@@ -12,7 +12,6 @@ from model.baselines import *
 from model.ablation import *
  
 from tool.train_evaluate import Trainer, Evaluator
-from tool.dataset import NetCDFDataset
 from tool.loss import (
     RMSELoss,
     MaskedMAELoss,
@@ -102,6 +101,7 @@ class MLBuilder:
             dataset_kind = "npz"
         else:
             import xarray as xr
+            from tool.dataset import NetCDFDataset
 
             ds = xr.open_mfdataset(self.dataset_file)
             if self.config.small_dataset:
