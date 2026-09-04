@@ -2,7 +2,6 @@ from stconvs2s_datasets import NPZSequenceDataset, RadarStationMemmapDataset
 
 import numpy as np
 import random as rd
-import xarray as xr
 import pandas as pd
 import matplotlib.pyplot as plt
 import time as tm
@@ -102,6 +101,8 @@ class MLBuilder:
 
             dataset_kind = "npz"
         else:
+            import xarray as xr
+
             ds = xr.open_mfdataset(self.dataset_file)
             if self.config.small_dataset:
                 ds = ds[dict(sample=slice(0, 500))]
