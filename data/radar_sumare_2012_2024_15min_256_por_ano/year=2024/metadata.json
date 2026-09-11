@@ -1,0 +1,21 @@
+{
+    "year": 2024,
+    "aggregate_minutes": 15,
+    "aggregation_method": "max",
+    "height": 256,
+    "width": 256,
+    "channels": 3,
+    "dtype": "uint8",
+    "shape": [
+        25505,
+        256,
+        256,
+        3
+    ],
+    "frames_file": "radar_frames.dat",
+    "timestamps_file": "radar_timestamps.npy",
+    "invalid_images": 0,
+    "ignored_windows": 0,
+    "estimated_frames": 25505,
+    "final_frames": 25505
+}

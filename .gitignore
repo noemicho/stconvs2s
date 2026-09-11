@@ -3,3 +3,11 @@
 *.hdf
 *.nc
 **/dask-worker-space
+data/alertario_2024.zip
+data/radar_sumare_2024.zip
+data/radar_sumare_2012_2024_15min_256_por_ano/radar_sumare_2012_2024_15min_256_por_ano/year=2024/M_all.dat
+data/radar_sumare_2012_2024_15min_256_por_ano/radar_sumare_2012_2024_15min_256_por_ano/year=2024/Y_all.dat
+data/radar_sumare_2012_2024_15min_256_por_ano/year=2024/Y_alertario.dat
+data/radar_sumare_2012_2024_15min_256_por_ano/year=2024/radar_timestamps.npy
+data/radar_sumare_2012_2024_15min_256_por_ano/year=2024/radar_frames.dat
+data/radar_sumare_2012_2024_15min_256_por_ano/year=2024/M_alertario.dat

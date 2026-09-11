@@ -1,0 +1,33 @@
+{
+    "source": "alertario",
+    "year": 2024,
+    "target": "m15",
+    "target_unit": "log1p(mm/15min)",
+    "target_transform": "log1p",
+    "original_target_unit": "mm/15min",
+    "height": 256,
+    "width": 256,
+    "channels": 1,
+    "temporal_resolution_minutes": 15,
+    "shape": [
+        25505,
+        256,
+        256,
+        1
+    ],
+    "Y_file": "Y_alertario.dat",
+    "M_file": "M_alertario.dat",
+    "Y_dtype": "float32",
+    "M_dtype": "uint8",
+    "mask": "1 where an Alerta Rio station observation exists",
+    "quality_control": "removed missing and negative precipitation values",
+    "max_m15_allowed": null,
+    "total_input_files": 471,
+    "files_with_year_data": 15,
+    "total_rows_year": 3470765,
+    "invalid_datetime_rows_scanned": 0,
+    "removed_invalid_m15_rows": 4663,
+    "removed_without_mapping_rows": 0,
+    "used_rows": 840675,
+    "skipped_rows_timestamp_absent": 317630
+}
